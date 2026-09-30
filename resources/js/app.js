@@ -5,3 +5,6 @@
  */
 
 import './echo';
+import * as E2EE from './e2ee';
+
+window.E2EE = E2EE;
