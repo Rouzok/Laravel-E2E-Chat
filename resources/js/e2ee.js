@@ -6,7 +6,100 @@
  * in memory (not persisted to IndexedDB for simplicity; add persistence as needed).
  */
 
-const KEY_STORE_NAME = 'e2ee-chat-keys';
+const DB_NAME = 'E2EEChatDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'keys';
+
+/**
+ * Open IndexedDB database connection.
+ * @returns {Promise<IDBDatabase>}
+ */
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(STORE_NAME)) {
+                db.createObjectStore(STORE_NAME);
+            }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+/**
+ * Store user's ECDH key pair securely in IndexedDB.
+ * The private key remains non-extractable in browser storage.
+ *
+ * @param {string|number} userId
+ * @param {{keyPair: CryptoKeyPair, publicKeyJwk: JsonWebKey}} data
+ * @returns {Promise<void>}
+ */
+export async function storeUserKeyPair(userId, data) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put({
+            userId: String(userId),
+            privateKey: data.keyPair.privateKey,
+            publicKey: data.keyPair.publicKey,
+            publicKeyJwk: data.publicKeyJwk,
+        }, String(userId));
+        req.onsuccess = () => resolve();
+        req.onerror = (e) => reject(e.target.error);
+    });
+}
+
+/**
+ * Retrieve user's key pair from IndexedDB.
+ *
+ * @param {string|number} userId
+ * @returns {Promise<{keyPair: CryptoKeyPair, publicKeyJwk: JsonWebKey}|null>}
+ */
+export async function getUserKeyPair(userId) {
+    try {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const req = store.get(String(userId));
+            req.onsuccess = (e) => {
+                const res = e.target.result;
+                if (!res) return resolve(null);
+                resolve({
+                    keyPair: {
+                        privateKey: res.privateKey,
+                        publicKey: res.publicKey,
+                    },
+                    publicKeyJwk: res.publicKeyJwk,
+                });
+            };
+            req.onerror = (e) => reject(e.target.error);
+        });
+    } catch (e) {
+        console.error('Failed to retrieve key pair from IndexedDB:', e);
+        return null;
+    }
+}
+
+/**
+ * Get existing ECDH key pair from IndexedDB or generate and persist a new one.
+ *
+ * @param {string|number} userId
+ * @returns {Promise<{keyPair: CryptoKeyPair, publicKeyJwk: JsonWebKey, isNew: boolean}>}
+ */
+export async function getOrGenerateUserKeyPair(userId) {
+    const existing = await getUserKeyPair(userId);
+    if (existing) {
+        return { ...existing, isNew: false };
+    }
+
+    const newKeys = await generateKeyPair();
+    await storeUserKeyPair(userId, newKeys);
+    return { ...newKeys, isNew: true };
+}
 
 /**
  * Generate an ECDH key pair.

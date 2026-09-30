@@ -176,25 +176,27 @@ function chatComponent({ authId, usersList }) {
         csrfToken: document.querySelector('meta[name="csrf-token"]')?.content,
 
         async initChat() {
-            // 1. Generate local ECDH key pair
+            // 1. Get or generate local ECDH key pair (persisted in IndexedDB)
             if (window.E2EE) {
-                const { keyPair, publicKeyJwk } = await window.E2EE.generateKeyPair();
+                const { keyPair, publicKeyJwk, isNew } = await window.E2EE.getOrGenerateUserKeyPair(this.authId);
                 this.keyPair = keyPair;
                 this.myPublicKeyJwk = publicKeyJwk;
                 this.keyGenerated = true;
 
-                // Send public key JWK to backend
-                await fetch('/user/public-key', {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': this.csrfToken,
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        public_key: JSON.stringify(publicKeyJwk),
-                    })
-                });
+                // Send public key JWK to backend if new key pair was generated
+                if (isNew) {
+                    await fetch('/user/public-key', {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRF-TOKEN': this.csrfToken,
+                            'Accept': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            public_key: JSON.stringify(publicKeyJwk),
+                        })
+                    });
+                }
             }
 
             // 2. Listen to private Echo channel for incoming messages
