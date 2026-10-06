@@ -56,6 +56,7 @@ new #[Title('Chat')] class extends Component {
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between">
                             <p class="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate" x-text="user.name"></p>
+                            <span x-show="unreadCounts[user.id]" x-text="unreadCounts[user.id]" class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded-full"></span>
                         </div>
                         <p class="text-xs text-neutral-500 dark:text-neutral-400 truncate" x-text="user.email"></p>
                     </div>
@@ -173,6 +174,7 @@ function chatComponent({ authId, usersList }) {
         newMessage: '',
         loadingHistory: false,
         sending: false,
+        unreadCounts: {},
         csrfToken: document.querySelector('meta[name="csrf-token"]')?.content,
 
         async initChat() {
@@ -201,15 +203,19 @@ function chatComponent({ authId, usersList }) {
 
             // 2. Listen to private Echo channel for incoming messages
             if (window.Echo) {
+                const handleEvent = async (e) => {
+                    await this.handleIncomingMessage(e);
+                };
+
                 window.Echo.private(`chat.${this.authId}`)
-                    .listen('MessageSent', async (e) => {
-                        await this.handleIncomingMessage(e);
-                    });
+                    .listen('.MessageSent', handleEvent)
+                    .listen('MessageSent', handleEvent);
             }
         },
 
         async selectUser(user) {
             this.selectedUser = user;
+            delete this.unreadCounts[user.id];
             this.messages = [];
             this.sharedKey = null;
             this.sharedKeyReady = false;
@@ -324,6 +330,11 @@ function chatComponent({ authId, usersList }) {
         },
 
         async handleIncomingMessage(e) {
+            // Deduplicate if message was already added
+            if (this.messages.some(m => m.id === e.id)) {
+                return;
+            }
+
             // If the incoming message is from currently selected user
             if (this.selectedUser && e.sender_id === this.selectedUser.id) {
                 let text = '[Encrypted Message]';
@@ -342,6 +353,9 @@ function chatComponent({ authId, usersList }) {
                     created_at: e.created_at
                 });
                 this.scrollToBottom();
+            } else if (e.sender_id !== this.authId) {
+                // Increment unread count for the sender
+                this.unreadCounts[e.sender_id] = (this.unreadCounts[e.sender_id] || 0) + 1;
             }
         },
 

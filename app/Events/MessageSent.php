@@ -31,6 +31,14 @@ class MessageSent implements ShouldBroadcastNow
     }
 
     /**
+     * The event's broadcast name.
+     */
+    public function broadcastAs(): string
+    {
+        return 'MessageSent';
+    }
+
+    /**
      * Get the data to broadcast.
      *
      * @return array<string, mixed>
