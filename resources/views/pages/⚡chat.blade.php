@@ -2,23 +2,35 @@
 
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Chat')] class extends Component {
     /**
-     * Get users available to chat with.
+     * Get the authenticated user's contacts available to chat with.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, User>
      */
     public function getUsersProperty()
     {
-        return User::where('id', '!=', Auth::id())
+        return Auth::user()
+            ->contacts()
             ->where('role', 'user')
-            ->select(['id', 'name', 'email', 'public_key'])
+            ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
             ->get();
     }
+
+    /**
+     * Refresh the contact list when a new contact is added.
+     */
+    #[On('contact-added')]
+    public function refreshContacts(): void
+    {
+        // Re-renders the component so the updated $this->users is passed to Alpine
+    }
 }; ?>
+
 
 <div
     x-data="chatComponent({
@@ -26,6 +38,7 @@ new #[Title('Chat')] class extends Component {
         usersList: {{ Js::from($this->users) }}
     })"
     x-init="initChat()"
+    x-effect="users = usersList"
     class="flex h-[calc(100vh-6rem)] w-full overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-zinc-900 shadow-sm"
 >
     <!-- Left Sidebar: Contact List -->
@@ -39,6 +52,8 @@ new #[Title('Chat')] class extends Component {
                 <span>{{ __('E2EE Enabled (ECDH / AES-256-GCM)') }}</span>
             </p>
         </div>
+
+        <livewire:add-contact />
 
         <div class="flex-1 overflow-y-auto divide-y divide-neutral-200 dark:divide-neutral-800">
             <template x-for="user in users" :key="user.id">
@@ -64,7 +79,7 @@ new #[Title('Chat')] class extends Component {
             </template>
 
             <div x-show="users.length === 0" class="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-                {{ __('No other contacts found.') }}
+                {{ __('No contacts yet. Click "+ Add Contact" to get started.') }}
             </div>
         </div>
     </div>
