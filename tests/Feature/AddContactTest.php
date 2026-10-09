@@ -39,6 +39,19 @@ test('add contact dispatches contact-added event on success', function () {
         ->assertDispatched('contact-added');
 });
 
+test('successful contact addition closes the modal and notifies chat state', function () {
+    $user = User::factory()->create(['role' => UserRole::User]);
+    $contact = User::factory()->create(['role' => UserRole::User]);
+
+    Livewire::actingAs($user)
+        ->test('add-contact')
+        ->call('openModal')
+        ->set('email', $contact->email)
+        ->call('addContact')
+        ->assertSet('isOpen', false)
+        ->assertDispatched('contacts-updated');
+});
+
 test('add contact fails with invalid email format', function () {
     $user = User::factory()->create(['role' => UserRole::User]);
 

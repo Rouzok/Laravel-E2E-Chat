@@ -63,17 +63,19 @@ new class extends Component {
         $this->dispatch('contacts-updated', users: $authUser->contacts()
             ->where('role', 'user')
             ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
-            ->get());
+            ->get(), addedContactId: $contact->id);
+        $this->isOpen = false;
 
         $this->reset('email');
     }
 }; ?>
 
-<div>
+<div x-data="{ isOpen: false }" x-on:contact-added.window="isOpen = false">
     {{-- Add Contact Button --}}
     <button
         type="button"
         wire:click="openModal"
+        x-on:click="isOpen = true"
         class="flex items-center gap-2 w-full px-4 py-2.5 text-sm font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-colors border-b border-neutral-200 dark:border-neutral-700"
     >
         <svg xmlns="http://www.w3.org/2000/svg" class="size-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -83,10 +85,12 @@ new class extends Component {
     </button>
 
     {{-- Modal Overlay --}}
-    @if ($isOpen)
-        <div
+    <div
+            x-cloak
+            x-show="isOpen"
+            x-transition.opacity.duration.150ms
             class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-            wire:click.self="closeModal"
+            x-on:click.self="isOpen = false; $wire.closeModal()"
         >
             <div class="bg-white dark:bg-zinc-800 rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
                 <div class="flex items-center justify-between mb-4">
@@ -96,6 +100,7 @@ new class extends Component {
                     <button
                         type="button"
                         wire:click="closeModal"
+                        x-on:click="isOpen = false"
                         class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" class="size-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -135,6 +140,7 @@ new class extends Component {
                         <button
                             type="button"
                             wire:click="closeModal"
+                            x-on:click="isOpen = false"
                             class="px-4 py-2 text-sm font-medium text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-zinc-700 rounded-lg transition-colors"
                         >
                             {{ __('Cancel') }}
@@ -157,5 +163,4 @@ new class extends Component {
                 </form>
             </div>
         </div>
-    @endif
 </div>
