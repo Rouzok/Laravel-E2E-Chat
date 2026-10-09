@@ -35,6 +35,17 @@ test('admin users can access admin dashboard', function () {
         ->assertOk();
 });
 
+test('admin users can access chat and see their contacts', function () {
+    $admin = User::factory()->admin()->create();
+    $contact = User::factory()->create(['role' => UserRole::User]);
+    $admin->contacts()->attach($contact->id);
+
+    $this->actingAs($admin)
+        ->get(route('chat'))
+        ->assertOk()
+        ->assertSee($contact->email);
+});
+
 test('admin users are redirected to admin dashboard when attempting to access user dashboard', function () {
     $admin = User::factory()->admin()->create();
 

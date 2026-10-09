@@ -107,6 +107,8 @@ new #[Title('Chat')] class extends Component {
                     </div>
                 </div>
 
+                <p x-show="chatError" x-text="chatError" role="alert" class="px-4 py-2 text-xs text-red-600 dark:text-red-400"></p>
+
                 <!-- Messages Stream -->
                 <div x-ref="messageBox" class="flex-1 overflow-y-auto p-4 space-y-3">
                     <template x-for="msg in messages" :key="msg.id || msg.temp_id">
@@ -145,6 +147,7 @@ new #[Title('Chat')] class extends Component {
                     <input
                         type="text"
                         x-model="newMessage"
+                        @input="sendError = ''"
                         :disabled="!sharedKeyReady || sending"
                         placeholder="{{ __('Type an encrypted message...') }}"
                         class="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
@@ -157,6 +160,7 @@ new #[Title('Chat')] class extends Component {
                         <span x-text="sending ? 'Sending...' : 'Send'"></span>
                     </button>
                 </form>
+                <p x-show="sendError" x-text="sendError" role="alert" class="px-3 pb-2 text-xs text-red-600 dark:text-red-400"></p>
             </div>
         </template>
 
@@ -173,8 +177,7 @@ new #[Title('Chat')] class extends Component {
 </div>
 
 <script>
-function chatComponent({ authId, usersList }) {
-    return {
+Alpine.data('chatComponent', ({ authId, usersList }) => ({
         authId: authId,
         users: usersList,
         selectedUser: null,
@@ -187,10 +190,14 @@ function chatComponent({ authId, usersList }) {
         isDerivingKey: false,
         messages: [],
         newMessage: '',
+        drafts: {},
         loadingHistory: false,
         sending: false,
         unreadCounts: {},
         pendingIncomingMessages: {},
+        selectionRequestId: 0,
+        chatError: '',
+        sendError: '',
         csrfToken: document.querySelector('meta[name="csrf-token"]')?.content,
 
         async initChat() {
@@ -227,34 +234,61 @@ function chatComponent({ authId, usersList }) {
         },
 
         async selectUser(user) {
+            const selectionRequestId = ++this.selectionRequestId;
+            if (this.selectedUser && this.newMessage.trim()) {
+                this.drafts[this.selectedUser.id] = this.newMessage;
+            }
+
             this.selectedUser = user;
+            this.newMessage = this.drafts[user.id] ?? '';
             delete this.unreadCounts[user.id];
             this.messages = [];
             this.sharedKey = null;
             this.sharedKeyReady = false;
             this.isDerivingKey = true;
             this.loadingHistory = true;
+            this.chatError = '';
+            this.sendError = '';
 
             try {
-                // Fetch latest public key of user if missing
                 let targetPubKeyStr = user.public_key;
                 if (!targetPubKeyStr) {
-                    const res = await fetch(`/users/${user.id}/public-key`);
+                    const res = await fetch(`/users/${user.id}/public-key`, {
+                        headers: { 'Accept': 'application/json' },
+                    });
+                    if (!res.ok) {
+                        throw new Error('Could not load the contact public key.');
+                    }
+
                     const data = await res.json();
                     targetPubKeyStr = data.public_key;
                 }
 
-                if (targetPubKeyStr && window.E2EE) {
-                    const recipientJwk = JSON.parse(targetPubKeyStr);
-                    this.recipientPublicKey = await window.E2EE.importPublicKey(recipientJwk);
-                    this.sharedKey = await window.E2EE.deriveSharedKey(this.keyPair.privateKey, this.recipientPublicKey);
-                    this.sharedKeyReady = true;
+                if (!targetPubKeyStr || !window.E2EE || !this.keyPair) {
+                    throw new Error('End-to-end encryption is not ready for this contact.');
                 }
+
+                const recipientJwk = JSON.parse(targetPubKeyStr);
+                const recipientPublicKey = await window.E2EE.importPublicKey(recipientJwk);
+                const sharedKey = await window.E2EE.deriveSharedKey(this.keyPair.privateKey, recipientPublicKey);
+
+                if (selectionRequestId !== this.selectionRequestId) return;
+
+                this.recipientPublicKey = recipientPublicKey;
+                this.sharedKey = sharedKey;
+                this.sharedKeyReady = true;
             } catch (err) {
                 console.error('Error deriving shared key:', err);
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.chatError = 'Could not establish encrypted chat with this contact.';
+                }
             } finally {
-                this.isDerivingKey = false;
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.isDerivingKey = false;
+                }
             }
+
+            if (selectionRequestId !== this.selectionRequestId) return;
 
             const pendingMessages = this.pendingIncomingMessages[user.id] ?? [];
             delete this.pendingIncomingMessages[user.id];
@@ -263,12 +297,11 @@ function chatComponent({ authId, usersList }) {
             }
 
             // Fetch chat history
-            await this.loadChatHistory();
+            await this.loadChatHistory(user.id, selectionRequestId);
         },
 
-        async loadChatHistory() {
-            if (!this.selectedUser) return;
-            const selectedUserId = this.selectedUser.id;
+        async loadChatHistory(selectedUserId = this.selectedUser?.id, selectionRequestId = this.selectionRequestId) {
+            if (!selectedUserId) return;
             const sharedKey = this.sharedKey;
             this.loadingHistory = true;
 
@@ -276,8 +309,18 @@ function chatComponent({ authId, usersList }) {
                 const res = await fetch(`/messages/${selectedUserId}`, {
                     headers: { 'Accept': 'application/json' }
                 });
+                if (!res.ok) {
+                    throw new Error('Could not load chat history.');
+                }
+
                 const history = await res.json();
-                if (this.selectedUser?.id !== selectedUserId) return;
+                if (!Array.isArray(history)) {
+                    throw new Error('The chat history response was invalid.');
+                }
+                if (selectionRequestId !== this.selectionRequestId || this.selectedUser?.id !== selectedUserId) return;
+                if (sharedKey) {
+                    this.chatError = '';
+                }
 
                 const decryptedMessages = [];
                 for (const msg of history) {
@@ -298,7 +341,7 @@ function chatComponent({ authId, usersList }) {
                         created_at: msg.created_at
                     });
                 }
-                if (this.selectedUser?.id !== selectedUserId) return;
+                if (selectionRequestId !== this.selectionRequestId || this.selectedUser?.id !== selectedUserId) return;
 
                 const messagesById = new Map(
                     [...decryptedMessages, ...this.messages].map((message) => [message.id, message]),
@@ -309,8 +352,11 @@ function chatComponent({ authId, usersList }) {
                 this.scrollToBottom();
             } catch (err) {
                 console.error('Error loading history:', err);
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.chatError = 'Could not load chat history. Please try selecting the contact again.';
+                }
             } finally {
-                if (this.selectedUser?.id === selectedUserId) {
+                if (selectionRequestId === this.selectionRequestId && this.selectedUser?.id === selectedUserId) {
                     this.loadingHistory = false;
                 }
             }
@@ -320,12 +366,16 @@ function chatComponent({ authId, usersList }) {
             if (!this.newMessage.trim() || !this.selectedUser || !this.sharedKey || this.sending) return;
 
             const text = this.newMessage.trim();
+            const recipient = this.selectedUser;
+            const sharedKey = this.sharedKey;
+            delete this.drafts[recipient.id];
             this.newMessage = '';
             this.sending = true;
+            this.sendError = '';
 
             try {
                 // Encrypt payload locally
-                const { encryptedPayload, iv } = await window.E2EE.encryptMessage(this.sharedKey, text);
+                const { encryptedPayload, iv } = await window.E2EE.encryptMessage(sharedKey, text);
 
                 // Send to backend
                 const res = await fetch('/messages', {
@@ -336,18 +386,22 @@ function chatComponent({ authId, usersList }) {
                         'Accept': 'application/json',
                     },
                     body: JSON.stringify({
-                        receiver_id: this.selectedUser.id,
+                        receiver_id: recipient.id,
                         encrypted_payload: encryptedPayload,
                         iv: iv
                     })
                 });
 
-                if (res.ok) {
-                    const savedMsg = await res.json();
+                if (!res.ok) {
+                    throw new Error('The encrypted message could not be sent.');
+                }
+
+                const savedMsg = await res.json();
+                if (this.selectedUser?.id === recipient.id) {
                     this.messages.push({
                         id: savedMsg.id,
                         sender_id: this.authId,
-                        receiver_id: this.selectedUser.id,
+                        receiver_id: recipient.id,
                         text: text,
                         created_at: savedMsg.created_at
                     });
@@ -355,6 +409,12 @@ function chatComponent({ authId, usersList }) {
                 }
             } catch (err) {
                 console.error('Failed to send message:', err);
+                this.drafts[recipient.id] = text;
+                if (this.selectedUser?.id === recipient.id && !this.newMessage) {
+                    this.newMessage = this.drafts[recipient.id];
+                    delete this.drafts[recipient.id];
+                    this.sendError = 'Message was not sent. Your draft has been restored.';
+                }
             } finally {
                 this.sending = false;
             }
@@ -412,6 +472,5 @@ function chatComponent({ authId, usersList }) {
                 }
             });
         }
-    };
-}
+}));
 </script>
