@@ -60,6 +60,10 @@ new class extends Component {
         $this->successMessage = __(':name has been added to your contacts.', ['name' => $contact->name]);
 
         $this->dispatch('contact-added');
+        $this->dispatch('contacts-updated', users: $authUser->contacts()
+            ->where('role', 'user')
+            ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
+            ->get());
 
         $this->reset('email');
     }

@@ -38,7 +38,7 @@ new #[Title('Chat')] class extends Component {
         usersList: {{ Js::from($this->users) }}
     })"
     x-init="initChat()"
-    x-effect="users = usersList"
+    x-on:contacts-updated.window="users = $event.detail.users"
     class="flex h-[calc(100vh-6rem)] w-full overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-zinc-900 shadow-sm"
 >
     <!-- Left Sidebar: Contact List -->
@@ -190,30 +190,29 @@ function chatComponent({ authId, usersList }) {
         loadingHistory: false,
         sending: false,
         unreadCounts: {},
+        pendingIncomingMessages: {},
         csrfToken: document.querySelector('meta[name="csrf-token"]')?.content,
 
         async initChat() {
             // 1. Get or generate local ECDH key pair (persisted in IndexedDB)
             if (window.E2EE) {
-                const { keyPair, publicKeyJwk, isNew } = await window.E2EE.getOrGenerateUserKeyPair(this.authId);
+                const { keyPair, publicKeyJwk } = await window.E2EE.getOrGenerateUserKeyPair(this.authId);
                 this.keyPair = keyPair;
                 this.myPublicKeyJwk = publicKeyJwk;
                 this.keyGenerated = true;
 
-                // Send public key JWK to backend if new key pair was generated
-                if (isNew) {
-                    await fetch('/user/public-key', {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': this.csrfToken,
-                            'Accept': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            public_key: JSON.stringify(publicKeyJwk),
-                        })
-                    });
-                }
+                // Synchronize the local public key with the server on each chat session.
+                await fetch('/user/public-key', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': this.csrfToken,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        public_key: JSON.stringify(publicKeyJwk),
+                    })
+                });
             }
 
             // 2. Listen to private Echo channel for incoming messages
@@ -223,8 +222,7 @@ function chatComponent({ authId, usersList }) {
                 };
 
                 window.Echo.private(`chat.${this.authId}`)
-                    .listen('.MessageSent', handleEvent)
-                    .listen('MessageSent', handleEvent);
+                    .listen('.MessageSent', handleEvent);
             }
         },
 
@@ -258,26 +256,35 @@ function chatComponent({ authId, usersList }) {
                 this.isDerivingKey = false;
             }
 
+            const pendingMessages = this.pendingIncomingMessages[user.id] ?? [];
+            delete this.pendingIncomingMessages[user.id];
+            for (const message of pendingMessages) {
+                await this.handleIncomingMessage(message);
+            }
+
             // Fetch chat history
             await this.loadChatHistory();
         },
 
         async loadChatHistory() {
             if (!this.selectedUser) return;
+            const selectedUserId = this.selectedUser.id;
+            const sharedKey = this.sharedKey;
             this.loadingHistory = true;
 
             try {
-                const res = await fetch(`/messages/${this.selectedUser.id}`, {
+                const res = await fetch(`/messages/${selectedUserId}`, {
                     headers: { 'Accept': 'application/json' }
                 });
                 const history = await res.json();
+                if (this.selectedUser?.id !== selectedUserId) return;
 
                 const decryptedMessages = [];
                 for (const msg of history) {
                     let decryptedText = '[Encrypted Message]';
-                    if (this.sharedKey && window.E2EE) {
+                    if (sharedKey && window.E2EE) {
                         try {
-                            decryptedText = await window.E2EE.decryptMessage(this.sharedKey, msg.encrypted_payload, msg.iv);
+                            decryptedText = await window.E2EE.decryptMessage(sharedKey, msg.encrypted_payload, msg.iv);
                         } catch (e) {
                             console.error('Failed to decrypt message:', e);
                             decryptedText = '[Unable to decrypt message]';
@@ -291,12 +298,21 @@ function chatComponent({ authId, usersList }) {
                         created_at: msg.created_at
                     });
                 }
-                this.messages = decryptedMessages;
+                if (this.selectedUser?.id !== selectedUserId) return;
+
+                const messagesById = new Map(
+                    [...decryptedMessages, ...this.messages].map((message) => [message.id, message]),
+                );
+                this.messages = [...messagesById.values()].sort(
+                    (first, second) => new Date(first.created_at) - new Date(second.created_at),
+                );
                 this.scrollToBottom();
             } catch (err) {
                 console.error('Error loading history:', err);
             } finally {
-                this.loadingHistory = false;
+                if (this.selectedUser?.id === selectedUserId) {
+                    this.loadingHistory = false;
+                }
             }
         },
 
@@ -352,8 +368,16 @@ function chatComponent({ authId, usersList }) {
 
             // If the incoming message is from currently selected user
             if (this.selectedUser && e.sender_id === this.selectedUser.id) {
+                if (!this.sharedKey) {
+                    const pendingMessages = this.pendingIncomingMessages[e.sender_id] ?? [];
+                    pendingMessages.push(e);
+                    this.pendingIncomingMessages[e.sender_id] = pendingMessages;
+
+                    return;
+                }
+
                 let text = '[Encrypted Message]';
-                if (this.sharedKey && window.E2EE) {
+                if (window.E2EE) {
                     try {
                         text = await window.E2EE.decryptMessage(this.sharedKey, e.encrypted_payload, e.iv);
                     } catch (err) {
