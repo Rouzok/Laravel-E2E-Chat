@@ -2,34 +2,44 @@
 
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
 new #[Title('Chat')] class extends Component {
     /**
-     * Get users available to chat with.
+     * Get the authenticated user's contacts available to chat with.
      *
      * @return \Illuminate\Database\Eloquent\Collection<int, User>
      */
     public function getUsersProperty()
     {
-        return User::where('id', '!=', Auth::id())
+        return Auth::user()
+            ->contacts()
             ->where('role', 'user')
-            ->select(['id', 'name', 'email', 'public_key'])
+            ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
             ->get();
+    }
+
+    /**
+     * Refresh the contact list when a new contact is added.
+     */
+    #[On('contact-added')]
+    public function refreshContacts(): void
+    {
+        // Re-renders the component so the updated $this->users is passed to Alpine
     }
 }; ?>
 
-<div
-    x-data="chatComponent({
-        authId: {{ auth()->id() }},
-        usersList: {{ Js::from($this->users) }}
-    })"
-    x-init="initChat()"
-    class="flex h-[calc(100vh-6rem)] w-full overflow-hidden rounded-xl border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-zinc-900 shadow-sm"
->
+
+<div x-data="chatComponent({
+    authId: {{ auth()->id() }},
+    usersList: {{ Js::from($this->users) }}
+})" x-init="initChat()" x-on:contacts-updated.window="updateContacts($event.detail)"
+    class="flex h-full min-h-0 w-full flex-1 overflow-hidden border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-zinc-900 shadow-sm">
     <!-- Left Sidebar: Contact List -->
-    <div class="w-1/3 min-w-[250px] max-w-[350px] flex flex-col border-r border-neutral-200 dark:border-neutral-700 bg-zinc-50 dark:bg-zinc-900/50">
+    <div
+        class="w-1/3 min-w-[250px] max-w-[350px] flex flex-col border-r border-neutral-200 dark:border-neutral-700 bg-zinc-50 dark:bg-zinc-900/50">
         <div class="p-4 border-b border-neutral-200 dark:border-neutral-700">
             <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100">
                 {{ __('Messages') }}
@@ -40,23 +50,26 @@ new #[Title('Chat')] class extends Component {
             </p>
         </div>
 
+        <livewire:add-contact />
+
         <div class="flex-1 overflow-y-auto divide-y divide-neutral-200 dark:divide-neutral-800">
             <template x-for="user in users" :key="user.id">
-                <button
-                    type="button"
-                    @click="selectUser(user)"
-                    :class="selectedUser?.id === user.id ? 'bg-neutral-200/70 dark:bg-neutral-800' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800/50'"
-                    class="w-full p-4 flex items-center gap-3 text-left transition-colors cursor-pointer"
-                >
+                <button type="button" @click="selectUser(user)"
+                    :class="selectedUser?.id === user.id ? 'bg-neutral-200/70 dark:bg-neutral-800' :
+                        'hover:bg-neutral-100 dark:hover:bg-neutral-800/50'"
+                    class="w-full p-4 flex items-center gap-3 text-left transition-colors cursor-pointer">
                     <div class="relative">
-                        <div class="size-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
+                        <div
+                            class="size-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
                             <span x-text="user.name.substring(0, 2).toUpperCase()"></span>
                         </div>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between">
-                            <p class="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate" x-text="user.name"></p>
-                            <span x-show="unreadCounts[user.id]" x-text="unreadCounts[user.id]" class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded-full"></span>
+                            <p class="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate"
+                                x-text="user.name"></p>
+                            <span x-show="unreadCounts[user.id]" x-text="unreadCounts[user.id]"
+                                class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded-full"></span>
                         </div>
                         <p class="text-xs text-neutral-500 dark:text-neutral-400 truncate" x-text="user.email"></p>
                     </div>
@@ -64,7 +77,7 @@ new #[Title('Chat')] class extends Component {
             </template>
 
             <div x-show="users.length === 0" class="p-4 text-center text-sm text-neutral-500 dark:text-neutral-400">
-                {{ __('No other contacts found.') }}
+                {{ __('No contacts yet. Click "+ Add Contact" to get started.') }}
             </div>
         </div>
     </div>
@@ -74,42 +87,45 @@ new #[Title('Chat')] class extends Component {
         <template x-if="selectedUser">
             <div class="flex-1 flex flex-col h-full overflow-hidden">
                 <!-- Chat Header -->
-                <div class="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
+                <div
+                    class="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
                     <div class="flex items-center gap-3">
-                        <div class="size-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
+                        <div
+                            class="size-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
                             <span x-text="selectedUser.name.substring(0, 2).toUpperCase()"></span>
                         </div>
                         <div>
-                            <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100" x-text="selectedUser.name"></h3>
+                            <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100"
+                                x-text="selectedUser.name"></h3>
                             <p class="text-xs text-neutral-500 dark:text-neutral-400" x-text="selectedUser.email"></p>
                         </div>
                     </div>
                     <div class="flex items-center gap-2">
-                        <span x-show="isDerivingKey" class="text-xs text-amber-500 animate-pulse">{{ __('Deriving Shared Secret...') }}</span>
-                        <span x-show="sharedKeyReady" class="text-xs px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-medium">
+                        <span x-show="isWaitingForContactKey"
+                            class="text-xs text-amber-500 animate-pulse">{{ __('Waiting for contact encryption key...') }}</span>
+                        <span x-show="isDerivingKey && !isWaitingForContactKey"
+                            class="text-xs text-amber-500 animate-pulse">{{ __('Deriving Shared Secret...') }}</span>
+                        <span x-show="sharedKeyReady"
+                            class="text-xs px-2 py-1 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-medium">
                             🔒 {{ __('Encrypted') }}
                         </span>
                     </div>
                 </div>
 
+                <p x-show="chatError" x-text="chatError" role="alert"
+                    class="px-4 py-2 text-xs text-red-600 dark:text-red-400"></p>
+
                 <!-- Messages Stream -->
                 <div x-ref="messageBox" class="flex-1 overflow-y-auto p-4 space-y-3">
                     <template x-for="msg in messages" :key="msg.id || msg.temp_id">
-                        <div
-                            :class="msg.sender_id === authId ? 'justify-end' : 'justify-start'"
-                            class="flex w-full"
-                        >
-                            <div
-                                :class="msg.sender_id === authId
-                                    ? 'bg-indigo-600 text-white rounded-l-lg rounded-tr-lg'
-                                    : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-r-lg rounded-tl-lg border border-neutral-200 dark:border-neutral-700'"
-                                class="max-w-[70%] px-4 py-2 text-sm shadow-sm space-y-1"
-                            >
+                        <div :class="msg.sender_id === authId ? 'justify-end' : 'justify-start'" class="flex w-full">
+                            <div :class="msg.sender_id === authId ?
+                                'bg-indigo-600 text-white rounded-l-lg rounded-tr-lg' :
+                                'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-r-lg rounded-tl-lg border border-neutral-200 dark:border-neutral-700'"
+                                class="max-w-[70%] px-4 py-2 text-sm shadow-sm space-y-1">
                                 <p class="break-words whitespace-pre-wrap" x-text="msg.text"></p>
-                                <div
-                                    :class="msg.sender_id === authId ? 'text-indigo-200' : 'text-neutral-400'"
-                                    class="text-[10px] text-right"
-                                >
+                                <div :class="msg.sender_id === authId ? 'text-indigo-200' : 'text-neutral-400'"
+                                    class="text-[10px] text-right">
                                     <span x-text="formatTime(msg.created_at)"></span>
                                 </div>
                             </div>
@@ -120,46 +136,50 @@ new #[Title('Chat')] class extends Component {
                         {{ __('Loading and decrypting message history...') }}
                     </div>
 
-                    <div x-show="!loadingHistory && messages.length === 0" class="text-center py-8 text-sm text-neutral-400">
+                    <div x-show="!loadingHistory && messages.length === 0"
+                        class="text-center py-8 text-sm text-neutral-400">
                         {{ __('No messages yet. Say hello!') }}
                     </div>
                 </div>
 
                 <!-- Input Footer -->
-                <form @submit.prevent="sendMessage()" class="p-3 border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-2 bg-zinc-50/50 dark:bg-zinc-900/50">
-                    <input
-                        type="text"
-                        x-model="newMessage"
-                        :disabled="!sharedKeyReady || sending"
+                <form @submit.prevent="sendMessage()"
+                    class="p-3 border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-2 bg-zinc-50/50 dark:bg-zinc-900/50">
+                    <input type="text" x-model="newMessage" :disabled="!sharedKeyReady || sending"
                         placeholder="{{ __('Type an encrypted message...') }}"
-                        class="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
-                    />
-                    <button
-                        type="submit"
-                        :disabled="!sharedKeyReady || !newMessage.trim() || sending"
-                        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1 cursor-pointer"
-                    >
+                        class="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
+                    <button type="submit" :disabled="!sharedKeyReady || !newMessage.trim() || sending"
+                        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1 cursor-pointer">
                         <span x-text="sending ? 'Sending...' : 'Send'"></span>
                     </button>
                 </form>
+                <p x-show="sendError" x-text="sendError" role="alert"
+                    class="px-3 pb-2 text-xs text-red-600 dark:text-red-400"></p>
             </div>
         </template>
 
         <template x-if="!selectedUser">
             <div class="flex-1 flex flex-col items-center justify-center p-8 text-center text-neutral-400">
-                <svg class="size-16 mb-4 stroke-1 text-neutral-300 dark:text-neutral-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a.75.75 0 01-1.054-.916 4.38 4.38 0 00.32-1.34A8.253 8.253 0 013 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                <svg class="size-16 mb-4 stroke-1 text-neutral-300 dark:text-neutral-700" fill="none"
+                    viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a.75.75 0 01-1.054-.916 4.38 4.38 0 00.32-1.34A8.253 8.253 0 013 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
                 </svg>
-                <h3 class="text-base font-medium text-neutral-700 dark:text-neutral-300">{{ __('Select a contact to start chatting') }}</h3>
-                <p class="text-xs mt-1 max-w-sm">{{ __('Messages are end-to-end encrypted. Plaintext messages and private keys never leave your browser.') }}</p>
+                <h3 class="text-base font-medium text-neutral-700 dark:text-neutral-300">
+                    {{ __('Select a contact to start chatting') }}</h3>
+                <p class="text-xs mt-1 max-w-sm">
+                    {{ __('Messages are end-to-end encrypted. Plaintext messages and private keys never leave your browser.') }}
+                </p>
             </div>
         </template>
     </div>
 </div>
 
 <script>
-function chatComponent({ authId, usersList }) {
-    return {
+    Alpine.data('chatComponent', ({
+        authId,
+        usersList
+    }) => ({
         authId: authId,
         users: usersList,
         selectedUser: null,
@@ -170,99 +190,205 @@ function chatComponent({ authId, usersList }) {
         sharedKey: null,
         sharedKeyReady: false,
         isDerivingKey: false,
+        isWaitingForContactKey: false,
+        keyPairPromise: null,
         messages: [],
         newMessage: '',
+        drafts: {},
         loadingHistory: false,
         sending: false,
         unreadCounts: {},
+        pendingIncomingMessages: {},
+        selectionRequestId: 0,
+        chatError: '',
+        sendError: '',
         csrfToken: document.querySelector('meta[name="csrf-token"]')?.content,
 
         async initChat() {
-            // 1. Get or generate local ECDH key pair (persisted in IndexedDB)
-            if (window.E2EE) {
-                const { keyPair, publicKeyJwk, isNew } = await window.E2EE.getOrGenerateUserKeyPair(this.authId);
-                this.keyPair = keyPair;
-                this.myPublicKeyJwk = publicKeyJwk;
-                this.keyGenerated = true;
-
-                // Send public key JWK to backend if new key pair was generated
-                if (isNew) {
-                    await fetch('/user/public-key', {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'X-CSRF-TOKEN': this.csrfToken,
-                            'Accept': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            public_key: JSON.stringify(publicKeyJwk),
-                        })
-                    });
-                }
+            try {
+                await this.ensureLocalKeyPair();
+            } catch (err) {
+                console.error('Could not initialize local encryption keys:', err);
+                this.chatError = 'Could not initialize encryption. Select a contact to retry.';
             }
 
-            // 2. Listen to private Echo channel for incoming messages
+            // Listen to the authenticated user's private Echo channel.
             if (window.Echo) {
                 const handleEvent = async (e) => {
                     await this.handleIncomingMessage(e);
                 };
 
                 window.Echo.private(`chat.${this.authId}`)
-                    .listen('.MessageSent', handleEvent)
-                    .listen('MessageSent', handleEvent);
+                    .listen('.MessageSent', handleEvent);
             }
         },
 
+        async ensureLocalKeyPair() {
+            if (!window.E2EE) {
+                throw new Error('The E2EE module is unavailable.');
+            }
+
+            if (!this.keyPair) {
+                if (!this.keyPairPromise) {
+                    this.keyPairPromise = window.E2EE.getOrGenerateUserKeyPair(this.authId).then((keys) => {
+                        this.keyPair = keys.keyPair;
+                        this.myPublicKeyJwk = keys.publicKeyJwk;
+                    });
+                }
+
+                try {
+                    await this.keyPairPromise;
+                } catch (err) {
+                    this.keyPairPromise = null;
+                    throw err;
+                }
+            }
+
+            const response = await fetch('/user/public-key', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': this.csrfToken,
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    public_key: JSON.stringify(this.myPublicKeyJwk),
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('The local public key could not be published.');
+            }
+
+            this.keyGenerated = true;
+        },
+
+        async fetchContactPublicKey(contactId, selectionRequestId) {
+            this.isWaitingForContactKey = false;
+
+            for (let attempt = 0; attempt < 30; attempt++) {
+                if (selectionRequestId !== this.selectionRequestId) return null;
+
+                const response = await fetch(`/users/${contactId}/public-key`, {
+                    cache: 'no-store',
+                    headers: { 'Accept': 'application/json' },
+                });
+                if (!response.ok) {
+                    throw new Error('Could not load the contact public key.');
+                }
+
+                const { public_key: publicKey } = await response.json();
+                if (publicKey) return publicKey;
+
+                this.isWaitingForContactKey = true;
+                await new Promise((resolve) => window.setTimeout(resolve, 1000));
+            }
+
+            return null;
+        },
+
         async selectUser(user) {
+            const selectionRequestId = ++this.selectionRequestId;
+            if (this.selectedUser && this.newMessage.trim()) {
+                this.drafts[this.selectedUser.id] = this.newMessage;
+            }
+
             this.selectedUser = user;
+            this.newMessage = this.drafts[user.id] ?? '';
             delete this.unreadCounts[user.id];
             this.messages = [];
             this.sharedKey = null;
             this.sharedKeyReady = false;
             this.isDerivingKey = true;
+            this.isWaitingForContactKey = false;
             this.loadingHistory = true;
+            this.chatError = '';
+            this.sendError = '';
 
             try {
-                // Fetch latest public key of user if missing
-                let targetPubKeyStr = user.public_key;
-                if (!targetPubKeyStr) {
-                    const res = await fetch(`/users/${user.id}/public-key`);
-                    const data = await res.json();
-                    targetPubKeyStr = data.public_key;
-                }
+                await this.ensureLocalKeyPair();
+                const targetPubKeyStr = await this.fetchContactPublicKey(user.id, selectionRequestId);
 
-                if (targetPubKeyStr && window.E2EE) {
+                if (selectionRequestId === this.selectionRequestId && targetPubKeyStr) {
                     const recipientJwk = JSON.parse(targetPubKeyStr);
-                    this.recipientPublicKey = await window.E2EE.importPublicKey(recipientJwk);
-                    this.sharedKey = await window.E2EE.deriveSharedKey(this.keyPair.privateKey, this.recipientPublicKey);
+                    const recipientPublicKey = await window.E2EE.importPublicKey(recipientJwk);
+                    const sharedKey = await window.E2EE.deriveSharedKey(this.keyPair.privateKey,
+                        recipientPublicKey);
+
+                    if (selectionRequestId !== this.selectionRequestId) return;
+
+                    this.recipientPublicKey = recipientPublicKey;
+                    this.sharedKey = sharedKey;
                     this.sharedKeyReady = true;
+                } else if (selectionRequestId === this.selectionRequestId) {
+                    this.chatError = 'This contact has not published an encryption key yet. Keep this chat open while they initialize encryption.';
                 }
             } catch (err) {
                 console.error('Error deriving shared key:', err);
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.chatError = 'Could not establish encrypted chat with this contact.';
+                }
             } finally {
-                this.isDerivingKey = false;
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.isDerivingKey = false;
+                    this.isWaitingForContactKey = false;
+                }
+            }
+
+            if (selectionRequestId !== this.selectionRequestId) return;
+
+            const pendingMessages = this.pendingIncomingMessages[user.id] ?? [];
+            delete this.pendingIncomingMessages[user.id];
+            for (const message of pendingMessages) {
+                await this.handleIncomingMessage(message);
             }
 
             // Fetch chat history
-            await this.loadChatHistory();
+            await this.loadChatHistory(user.id, selectionRequestId);
         },
 
-        async loadChatHistory() {
-            if (!this.selectedUser) return;
+        async updateContacts({ users, addedContactId }) {
+            this.users = users;
+            const addedContact = this.users.find((contact) => Number(contact.id) === Number(addedContactId));
+
+            if (addedContact) {
+                await this.selectUser({ ...addedContact, public_key: null });
+            }
+        },
+
+        async loadChatHistory(selectedUserId = this.selectedUser?.id, selectionRequestId = this
+            .selectionRequestId) {
+            if (!selectedUserId) return;
+            const sharedKey = this.sharedKey;
             this.loadingHistory = true;
 
             try {
-                const res = await fetch(`/messages/${this.selectedUser.id}`, {
-                    headers: { 'Accept': 'application/json' }
+                const res = await fetch(`/messages/${selectedUserId}`, {
+                    headers: {
+                        'Accept': 'application/json'
+                    }
                 });
+                if (!res.ok) {
+                    throw new Error('Could not load chat history.');
+                }
+
                 const history = await res.json();
+                if (!Array.isArray(history)) {
+                    throw new Error('The chat history response was invalid.');
+                }
+                if (selectionRequestId !== this.selectionRequestId || this.selectedUser?.id !==
+                    selectedUserId) return;
+                if (sharedKey) {
+                    this.chatError = '';
+                }
 
                 const decryptedMessages = [];
                 for (const msg of history) {
                     let decryptedText = '[Encrypted Message]';
-                    if (this.sharedKey && window.E2EE) {
+                    if (sharedKey && window.E2EE) {
                         try {
-                            decryptedText = await window.E2EE.decryptMessage(this.sharedKey, msg.encrypted_payload, msg.iv);
+                            decryptedText = await window.E2EE.decryptMessage(sharedKey, msg
+                                .encrypted_payload, msg.iv);
                         } catch (e) {
                             console.error('Failed to decrypt message:', e);
                             decryptedText = '[Unable to decrypt message]';
@@ -276,25 +402,50 @@ function chatComponent({ authId, usersList }) {
                         created_at: msg.created_at
                     });
                 }
-                this.messages = decryptedMessages;
+                if (selectionRequestId !== this.selectionRequestId || this.selectedUser?.id !==
+                    selectedUserId) return;
+
+                const messagesById = new Map(
+                    [...decryptedMessages, ...this.messages].map((message) => [message.id,
+                        message
+                    ]),
+                );
+                this.messages = [...messagesById.values()].sort(
+                    (first, second) => new Date(first.created_at) - new Date(second.created_at),
+                );
                 this.scrollToBottom();
             } catch (err) {
                 console.error('Error loading history:', err);
+                if (selectionRequestId === this.selectionRequestId) {
+                    this.chatError =
+                        'Could not load chat history. Please try selecting the contact again.';
+                }
             } finally {
-                this.loadingHistory = false;
+                if (selectionRequestId === this.selectionRequestId && this.selectedUser?.id ===
+                    selectedUserId) {
+                    this.loadingHistory = false;
+                }
             }
         },
 
         async sendMessage() {
-            if (!this.newMessage.trim() || !this.selectedUser || !this.sharedKey || this.sending) return;
+            if (!this.newMessage.trim() || !this.selectedUser || !this.sharedKey || this.sending)
+                return;
 
             const text = this.newMessage.trim();
+            const recipient = this.selectedUser;
+            const sharedKey = this.sharedKey;
+            delete this.drafts[recipient.id];
             this.newMessage = '';
             this.sending = true;
+            this.sendError = '';
 
             try {
                 // Encrypt payload locally
-                const { encryptedPayload, iv } = await window.E2EE.encryptMessage(this.sharedKey, text);
+                const {
+                    encryptedPayload,
+                    iv
+                } = await window.E2EE.encryptMessage(sharedKey, text);
 
                 // Send to backend
                 const res = await fetch('/messages', {
@@ -305,18 +456,22 @@ function chatComponent({ authId, usersList }) {
                         'Accept': 'application/json',
                     },
                     body: JSON.stringify({
-                        receiver_id: this.selectedUser.id,
+                        receiver_id: recipient.id,
                         encrypted_payload: encryptedPayload,
                         iv: iv
                     })
                 });
 
-                if (res.ok) {
-                    const savedMsg = await res.json();
+                if (!res.ok) {
+                    throw new Error('The encrypted message could not be sent.');
+                }
+
+                const savedMsg = await res.json();
+                if (this.selectedUser?.id === recipient.id) {
                     this.messages.push({
                         id: savedMsg.id,
                         sender_id: this.authId,
-                        receiver_id: this.selectedUser.id,
+                        receiver_id: recipient.id,
                         text: text,
                         created_at: savedMsg.created_at
                     });
@@ -324,6 +479,12 @@ function chatComponent({ authId, usersList }) {
                 }
             } catch (err) {
                 console.error('Failed to send message:', err);
+                this.drafts[recipient.id] = text;
+                if (this.selectedUser?.id === recipient.id && !this.newMessage) {
+                    this.newMessage = this.drafts[recipient.id];
+                    delete this.drafts[recipient.id];
+                    this.sendError = 'Message was not sent. Your draft has been restored.';
+                }
             } finally {
                 this.sending = false;
             }
@@ -337,10 +498,19 @@ function chatComponent({ authId, usersList }) {
 
             // If the incoming message is from currently selected user
             if (this.selectedUser && e.sender_id === this.selectedUser.id) {
+                if (!this.sharedKey) {
+                    const pendingMessages = this.pendingIncomingMessages[e.sender_id] ?? [];
+                    pendingMessages.push(e);
+                    this.pendingIncomingMessages[e.sender_id] = pendingMessages;
+
+                    return;
+                }
+
                 let text = '[Encrypted Message]';
-                if (this.sharedKey && window.E2EE) {
+                if (window.E2EE) {
                     try {
-                        text = await window.E2EE.decryptMessage(this.sharedKey, e.encrypted_payload, e.iv);
+                        text = await window.E2EE.decryptMessage(this.sharedKey, e.encrypted_payload, e
+                            .iv);
                     } catch (err) {
                         console.error('Failed to decrypt incoming message:', err);
                     }
@@ -362,7 +532,10 @@ function chatComponent({ authId, usersList }) {
         formatTime(dateStr) {
             if (!dateStr) return '';
             const d = new Date(dateStr);
-            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return d.toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         },
 
         scrollToBottom() {
@@ -373,6 +546,5 @@ function chatComponent({ authId, usersList }) {
                 }
             });
         }
-    };
-}
+    }));
 </script>

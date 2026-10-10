@@ -94,10 +94,61 @@ test('authenticated user can fetch chat history between two users in chronologic
         ->and($messages[1]['id'])->toBe($msg2->id);
 });
 
+test('admin can synchronize encryption keys and send encrypted messages', function () {
+    Event::fake([MessageSent::class]);
+
+    $admin = User::factory()->admin()->create();
+    $contact = User::factory()->create([
+        'role' => UserRole::User,
+        'public_key' => '{"kty":"EC","crv":"P-256","x":"contact_x","y":"contact_y"}',
+    ]);
+    $publicKey = '{"kty":"EC","crv":"P-256","x":"admin_x","y":"admin_y"}';
+
+    $this->actingAs($admin)
+        ->putJson(route('user.public-key.store'), ['public_key' => $publicKey])
+        ->assertOk();
+
+    $this->getJson(route('user.public-key', $contact))
+        ->assertOk()
+        ->assertJson(['public_key' => $contact->public_key]);
+
+    $this->postJson(route('messages.store'), [
+        'receiver_id' => $contact->id,
+        'encrypted_payload' => 'ciphertext-base64',
+        'iv' => 'iv-base64',
+    ])->assertCreated();
+
+    $this->getJson(route('messages.history', $contact))
+        ->assertOk()
+        ->assertJsonPath('0.encrypted_payload', 'ciphertext-base64');
+
+    expect($admin->fresh()->public_key)->toBe($publicKey);
+    $this->assertDatabaseHas('messages', [
+        'sender_id' => $admin->id,
+        'receiver_id' => $contact->id,
+        'encrypted_payload' => 'ciphertext-base64',
+        'iv' => 'iv-base64',
+    ]);
+    Event::assertDispatched(MessageSent::class);
+});
+
+test('guests receive 401 when sending encrypted messages', function () {
+    $contact = User::factory()->create(['role' => UserRole::User]);
+
+    $this->postJson(route('messages.store'), [
+        'receiver_id' => $contact->id,
+        'encrypted_payload' => 'ciphertext-base64',
+        'iv' => 'iv-base64',
+    ])->assertUnauthorized();
+});
+
 test('authenticated regular user can visit chat page', function () {
     $user = User::factory()->create(['role' => UserRole::User]);
+    $contact = User::factory()->create(['role' => UserRole::User]);
+    $user->contacts()->attach($contact->id);
 
     $this->actingAs($user)
         ->get(route('chat'))
-        ->assertOk();
+        ->assertOk()
+        ->assertSee($contact->email);
 });
