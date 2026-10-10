@@ -14,11 +14,25 @@ new #[Title('Chat')] class extends Component {
      */
     public function getUsersProperty()
     {
-        return Auth::user()
+        $authUser = Auth::user();
+        $blockedUserIds = $authUser->blockedUsers()->pluck('users.id')->all();
+        $blockedByUserIds = $authUser->blockedByUsers()->pluck('users.id')->all();
+
+        return $authUser
             ->contacts()
             ->where('role', 'user')
-            ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
-            ->get();
+            ->select(['users.id', 'users.name', 'users.email', 'users.public_key', 'users.public_key_version'])
+            ->get()
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'public_key' => $user->public_key,
+                'public_key_version' => $user->public_key_version,
+                'display_name' => $user->pivot->custom_name ?: $user->email,
+                'blocked_by_me' => in_array($user->id, $blockedUserIds),
+                'blocked_me' => in_array($user->id, $blockedByUserIds),
+            ]);
     }
 
     /**
@@ -37,6 +51,26 @@ new #[Title('Chat')] class extends Component {
     usersList: {{ Js::from($this->users) }}
 })" x-init="initChat()" x-on:contacts-updated.window="updateContacts($event.detail)"
     class="flex h-full min-h-0 w-full flex-1 overflow-hidden border border-neutral-200 bg-white dark:border-neutral-700 dark:bg-zinc-900 shadow-sm">
+    <div x-show="keySetupMode" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <section class="w-full max-w-xl space-y-4 rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900" role="dialog" aria-modal="true">
+            <h2 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100" x-text="keySetupMode === 'create' ? 'Save your recovery phrase' : 'Restore your chat key'"></h2>
+            <p x-show="keySetupMode === 'create'" class="text-sm text-neutral-600 dark:text-neutral-300">Save this 24-word phrase somewhere private. It is shown only once and is required to recover your chat key after a password reset.</p>
+            <textarea x-show="keySetupMode === 'create'" x-model="recoveryPhrase" readonly rows="4" class="w-full rounded-lg border border-neutral-300 bg-neutral-50 p-3 font-mono text-sm dark:border-neutral-700 dark:bg-zinc-800"></textarea>
+            <label x-show="keySetupMode === 'create'" class="flex items-start gap-2 text-sm text-neutral-700 dark:text-neutral-300">
+                <input type="checkbox" x-model="recoveryPhraseSaved" class="mt-1 rounded">
+                <span>I saved the recovery phrase somewhere private.</span>
+            </label>
+            <label class="block space-y-1 text-sm text-neutral-700 dark:text-neutral-300">
+                <span x-text="keySetupMode === 'create' ? 'Current account password' : 'Account password'"></span>
+                <input type="password" x-model="keyPassword" autocomplete="current-password" class="w-full rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-zinc-800">
+            </label>
+            <p x-show="keySetupError" x-text="keySetupError" role="alert" class="text-sm text-red-600"></p>
+            <button type="button" @click="keySetupMode === 'create' ? savePortableKey() : restorePortableKey()" :disabled="keySetupBusy || !keyPassword || (keySetupMode === 'create' && !recoveryPhraseSaved)" class="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                <span x-text="keySetupBusy ? 'Working...' : (keySetupMode === 'create' ? 'Save phrase and continue' : 'Restore chat key')"></span>
+            </button>
+        </section>
+    </div>
+
     <!-- Left Sidebar: Contact List -->
     <div
         class="w-1/3 min-w-[250px] max-w-[350px] flex flex-col border-r border-neutral-200 dark:border-neutral-700 bg-zinc-50 dark:bg-zinc-900/50">
@@ -61,13 +95,13 @@ new #[Title('Chat')] class extends Component {
                     <div class="relative">
                         <div
                             class="size-10 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
-                            <span x-text="user.name.substring(0, 2).toUpperCase()"></span>
+                            <span x-text="user.display_name.substring(0, 2).toUpperCase()"></span>
                         </div>
                     </div>
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between">
                             <p class="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate"
-                                x-text="user.name"></p>
+                                x-text="user.display_name"></p>
                             <span x-show="unreadCounts[user.id]" x-text="unreadCounts[user.id]"
                                 class="px-2 py-0.5 text-xs font-bold bg-indigo-600 text-white rounded-full"></span>
                         </div>
@@ -90,13 +124,15 @@ new #[Title('Chat')] class extends Component {
                 <div
                     class="p-4 border-b border-neutral-200 dark:border-neutral-700 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-900/50">
                     <div class="flex items-center gap-3">
-                        <div
+                        <a :href="'{{ route('contacts.show', ['user' => 'CONTACT_ID']) }}'.replace('CONTACT_ID', selectedUser.id)"
+                            aria-label="{{ __('Open contact profile') }}"
                             class="size-9 rounded-full bg-indigo-500 text-white flex items-center justify-center font-semibold text-sm">
-                            <span x-text="selectedUser.name.substring(0, 2).toUpperCase()"></span>
-                        </div>
+                            <span x-text="selectedUser.display_name.substring(0, 2).toUpperCase()"></span>
+                        </a>
                         <div>
-                            <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-100"
-                                x-text="selectedUser.name"></h3>
+                            <a :href="'{{ route('contacts.show', ['user' => 'CONTACT_ID']) }}'.replace('CONTACT_ID', selectedUser.id)"
+                                class="text-sm font-semibold text-neutral-900 hover:text-indigo-600 dark:text-neutral-100 dark:hover:text-indigo-400"
+                                x-text="selectedUser.display_name"></a>
                             <p class="text-xs text-neutral-500 dark:text-neutral-400" x-text="selectedUser.email"></p>
                         </div>
                     </div>
@@ -111,6 +147,11 @@ new #[Title('Chat')] class extends Component {
                         </span>
                     </div>
                 </div>
+
+                <p x-show="selectedUser.blocked_by_me || selectedUser.blocked_me" role="status"
+                    class="px-4 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30">
+                    {{ __('Messaging is unavailable while either person has blocked the other.') }}
+                </p>
 
                 <p x-show="chatError" x-text="chatError" role="alert"
                     class="px-4 py-2 text-xs text-red-600 dark:text-red-400"></p>
@@ -145,10 +186,10 @@ new #[Title('Chat')] class extends Component {
                 <!-- Input Footer -->
                 <form @submit.prevent="sendMessage()"
                     class="p-3 border-t border-neutral-200 dark:border-neutral-700 flex items-center gap-2 bg-zinc-50/50 dark:bg-zinc-900/50">
-                    <input type="text" x-model="newMessage" :disabled="!sharedKeyReady || sending"
+                    <input type="text" x-model="newMessage" :disabled="!sharedKeyReady || sending || selectedUser.blocked_by_me || selectedUser.blocked_me"
                         placeholder="{{ __('Type an encrypted message...') }}"
                         class="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-zinc-800 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
-                    <button type="submit" :disabled="!sharedKeyReady || !newMessage.trim() || sending"
+                    <button type="submit" :disabled="!sharedKeyReady || !newMessage.trim() || sending || selectedUser.blocked_by_me || selectedUser.blocked_me"
                         class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-1 cursor-pointer">
                         <span x-text="sending ? 'Sending...' : 'Send'"></span>
                     </button>
@@ -185,8 +226,19 @@ new #[Title('Chat')] class extends Component {
         selectedUser: null,
         keyPair: null,
         myPublicKeyJwk: null,
+        identityVersion: 0,
+        identityInitialized: false,
+        keyBackupInfo: null,
+        pendingKeyPair: null,
+        recoveryPhrase: '',
+        recoveryPhraseSaved: false,
+        keyPassword: '',
+        keySetupMode: '',
+        keySetupError: '',
+        keySetupBusy: false,
         keyGenerated: false,
         recipientPublicKey: null,
+        recipientKeyVersion: 0,
         sharedKey: null,
         sharedKeyReady: false,
         isDerivingKey: false,
@@ -219,48 +271,153 @@ new #[Title('Chat')] class extends Component {
                 };
 
                 window.Echo.private(`chat.${this.authId}`)
-                    .listen('.MessageSent', handleEvent);
+                    .listen('.MessageSent', handleEvent)
+                    .listen('.CleanupUpdated', (event) => {
+                        if (event.status === 'approved' && this.selectedUser &&
+                            [Number(event.first_user_id), Number(event.second_user_id)].includes(Number(this.selectedUser.id))) {
+                            this.messages = [];
+                            this.loadChatHistory();
+                        }
+                    })
+                    .listen('.BlockStatusUpdated', (event) => {
+                        const blockerId = Number(event.blocker_id);
+                        const blockedId = Number(event.blocked_id);
+                        const contactId = blockerId === Number(this.authId) ? blockedId : blockerId;
+                        const contact = this.users.find((user) => Number(user.id) === contactId);
+
+                        if (!contact) return;
+
+                        if (blockerId === Number(this.authId)) {
+                            contact.blocked_by_me = event.blocked;
+                        } else {
+                            contact.blocked_me = event.blocked;
+                        }
+
+                        if (this.selectedUser && Number(this.selectedUser.id) === contactId) {
+                            this.selectedUser.blocked_by_me = contact.blocked_by_me;
+                            this.selectedUser.blocked_me = contact.blocked_me;
+                        }
+                    });
             }
         },
 
         async ensureLocalKeyPair() {
-            if (!window.E2EE) {
-                throw new Error('The E2EE module is unavailable.');
+            if (!window.E2EE) throw new Error('The E2EE module is unavailable.');
+            if (this.identityInitialized) return;
+
+            const response = await fetch('/user/key-backup', { headers: { 'Accept': 'application/json' } });
+            if (!response.ok) throw new Error('Could not check for an encrypted key backup.');
+            this.keyBackupInfo = await response.json();
+            const loginPassword = window.consumeChatLoginPassword?.() ?? null;
+            const currentVersion = Number(this.keyBackupInfo.public_key_version || (this.keyBackupInfo.public_key ? 1 : 0));
+
+            const localVersion = currentVersion || 1;
+            const localKey = await window.E2EE.getUserKeyPair(this.authId, localVersion);
+            if (localKey && this.keyBackupInfo.has_backup) {
+                this.useLocalIdentity(localKey, localVersion);
+                this.identityInitialized = true;
+                return;
             }
 
-            if (!this.keyPair) {
-                if (!this.keyPairPromise) {
-                    this.keyPairPromise = window.E2EE.getOrGenerateUserKeyPair(this.authId).then((keys) => {
-                        this.keyPair = keys.keyPair;
-                        this.myPublicKeyJwk = keys.publicKeyJwk;
-                    });
+            if (this.keyBackupInfo.has_backup) {
+                this.identityVersion = currentVersion;
+                if (loginPassword) {
+                    try {
+                        await this.restoreKeyWithPassword(loginPassword);
+                        this.identityInitialized = true;
+                        return;
+                    } catch (error) {
+                        console.warn('Could not unlock the chat key with the login password:', error);
+                        this.keySetupError = 'Your sign-in password could not unlock the chat key. Enter the current account password to restore it.';
+                    }
                 }
-
-                try {
-                    await this.keyPairPromise;
-                } catch (err) {
-                    this.keyPairPromise = null;
-                    throw err;
-                }
+                this.keySetupMode = 'restore';
+                this.identityInitialized = true;
+                return;
             }
 
-            const response = await fetch('/user/public-key', {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': this.csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    public_key: JSON.stringify(this.myPublicKeyJwk),
-                })
-            });
+            this.identityVersion = Math.max(currentVersion, localKey ? localVersion : 0) + 1;
+            this.pendingKeyPair = await window.E2EE.generatePortableKeyPair();
+            this.recoveryPhrase = await window.E2EE.generateRecoveryPhrase();
+            this.keySetupMode = 'create';
+            this.identityInitialized = true;
+        },
 
-            if (!response.ok) {
-                throw new Error('The local public key could not be published.');
-            }
-
+        useLocalIdentity(keys, version) {
+            this.keyPair = keys.keyPair;
+            this.myPublicKeyJwk = keys.publicKeyJwk;
+            this.identityVersion = version;
             this.keyGenerated = true;
+        },
+
+        async restoreKeyWithPassword(password) {
+            const restored = await window.E2EE.restoreKeyBackup(
+                this.keyBackupInfo.password_key_backup,
+                password,
+            );
+            const expected = JSON.parse(this.keyBackupInfo.public_key);
+            if (restored.publicKeyJwk.x !== expected.x || restored.publicKeyJwk.y !== expected.y) {
+                throw new Error('The backup does not match the published public key.');
+            }
+
+            await window.E2EE.storeUserKeyPair(this.authId, restored, this.identityVersion);
+            this.useLocalIdentity(restored, this.identityVersion);
+        },
+
+        async savePortableKey() {
+            if (!this.pendingKeyPair || !this.recoveryPhraseSaved) return;
+            this.keySetupBusy = true;
+            this.keySetupError = '';
+
+            try {
+                const passwordBackup = await window.E2EE.encryptKeyBackup(this.pendingKeyPair, this.keyPassword);
+                const recoveryBackup = await window.E2EE.encryptKeyBackup(this.pendingKeyPair, this.recoveryPhrase, true);
+                const response = await fetch('/user/key-backup', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': this.csrfToken,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        public_key: JSON.stringify(this.pendingKeyPair.publicKeyJwk),
+                        public_key_version: this.identityVersion,
+                        password_key_backup: passwordBackup,
+                        recovery_key_backup: recoveryBackup.envelope,
+                        recovery_key_verifier: recoveryBackup.verifier,
+                    }),
+                });
+                if (!response.ok) throw new Error('The encrypted key backup could not be saved.');
+
+                await window.E2EE.storeUserKeyPair(this.authId, this.pendingKeyPair, this.identityVersion);
+                this.useLocalIdentity(this.pendingKeyPair, this.identityVersion);
+                this.pendingKeyPair = null;
+                this.keyPassword = '';
+                this.recoveryPhrase = '';
+                this.recoveryPhraseSaved = false;
+                this.keySetupMode = '';
+            } catch (error) {
+                console.error('Could not save portable chat keys:', error);
+                this.keySetupError = 'Could not save the encrypted key backup. Please try again.';
+            } finally {
+                this.keySetupBusy = false;
+            }
+        },
+
+        async restorePortableKey() {
+            this.keySetupBusy = true;
+            this.keySetupError = '';
+
+            try {
+                await this.restoreKeyWithPassword(this.keyPassword);
+                this.keyPassword = '';
+                this.keySetupMode = '';
+            } catch (error) {
+                console.error('Could not restore portable chat key:', error);
+                this.keySetupError = 'That password did not unlock this chat key. Check it and try again.';
+            } finally {
+                this.keySetupBusy = false;
+            }
         },
 
         async fetchContactPublicKey(contactId, selectionRequestId) {
@@ -277,8 +434,8 @@ new #[Title('Chat')] class extends Component {
                     throw new Error('Could not load the contact public key.');
                 }
 
-                const { public_key: publicKey } = await response.json();
-                if (publicKey) return publicKey;
+                const { public_key: publicKey, version: publicKeyVersion } = await response.json();
+                if (publicKey) return { publicKey, version: Number(publicKeyVersion) };
 
                 this.isWaitingForContactKey = true;
                 await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -299,6 +456,7 @@ new #[Title('Chat')] class extends Component {
             this.messages = [];
             this.sharedKey = null;
             this.sharedKeyReady = false;
+            this.recipientKeyVersion = 0;
             this.isDerivingKey = true;
             this.isWaitingForContactKey = false;
             this.loadingHistory = true;
@@ -307,10 +465,11 @@ new #[Title('Chat')] class extends Component {
 
             try {
                 await this.ensureLocalKeyPair();
+                if (!this.keyPair) throw new Error('Restore or set up your chat key to continue.');
                 const targetPubKeyStr = await this.fetchContactPublicKey(user.id, selectionRequestId);
 
                 if (selectionRequestId === this.selectionRequestId && targetPubKeyStr) {
-                    const recipientJwk = JSON.parse(targetPubKeyStr);
+                    const recipientJwk = JSON.parse(targetPubKeyStr.publicKey);
                     const recipientPublicKey = await window.E2EE.importPublicKey(recipientJwk);
                     const sharedKey = await window.E2EE.deriveSharedKey(this.keyPair.privateKey,
                         recipientPublicKey);
@@ -318,6 +477,7 @@ new #[Title('Chat')] class extends Component {
                     if (selectionRequestId !== this.selectionRequestId) return;
 
                     this.recipientPublicKey = recipientPublicKey;
+                    this.recipientKeyVersion = targetPubKeyStr.version;
                     this.sharedKey = sharedKey;
                     this.sharedKeyReady = true;
                 } else if (selectionRequestId === this.selectionRequestId) {
@@ -384,14 +544,13 @@ new #[Title('Chat')] class extends Component {
 
                 const decryptedMessages = [];
                 for (const msg of history) {
-                    let decryptedText = '[Encrypted Message]';
-                    if (sharedKey && window.E2EE) {
+                    let decryptedText = '[Message unavailable on this browser]';
+                    if (window.E2EE) {
                         try {
-                            decryptedText = await window.E2EE.decryptMessage(sharedKey, msg
-                                .encrypted_payload, msg.iv);
+                            const messageKey = await this.sharedKeyForMessage(msg);
+                            if (messageKey) decryptedText = await window.E2EE.decryptMessage(messageKey, msg.encrypted_payload, msg.iv);
                         } catch (e) {
                             console.error('Failed to decrypt message:', e);
-                            decryptedText = '[Unable to decrypt message]';
                         }
                     }
                     decryptedMessages.push({
@@ -428,6 +587,24 @@ new #[Title('Chat')] class extends Component {
             }
         },
 
+        async sharedKeyForMessage(message) {
+            const sentByMe = Number(message.sender_id) === Number(this.authId);
+            const ownVersion = Number((sentByMe ? message.sender_key_version : message.receiver_key_version) || 1);
+            const remoteVersion = Number((sentByMe ? message.receiver_key_version : message.sender_key_version) || 1);
+            const ownKeys = await window.E2EE.getUserKeyPair(this.authId, ownVersion);
+            if (!ownKeys) return null;
+
+            const response = await fetch(`/users/${this.selectedUser.id}/public-key?version=${remoteVersion}`, {
+                cache: 'no-store',
+                headers: { 'Accept': 'application/json' },
+            });
+            if (!response.ok) return null;
+            const { public_key: publicKey } = await response.json();
+            if (!publicKey) return null;
+
+            return window.E2EE.deriveSharedKey(ownKeys.keyPair.privateKey, await window.E2EE.importPublicKey(JSON.parse(publicKey)));
+        },
+
         async sendMessage() {
             if (!this.newMessage.trim() || !this.selectedUser || !this.sharedKey || this.sending)
                 return;
@@ -457,6 +634,8 @@ new #[Title('Chat')] class extends Component {
                     },
                     body: JSON.stringify({
                         receiver_id: recipient.id,
+                        sender_key_version: this.identityVersion,
+                        receiver_key_version: this.recipientKeyVersion,
                         encrypted_payload: encryptedPayload,
                         iv: iv
                     })
@@ -491,6 +670,15 @@ new #[Title('Chat')] class extends Component {
         },
 
         async handleIncomingMessage(e) {
+            if (e.sender && !this.users.some((user) => Number(user.id) === Number(e.sender.id))) {
+                this.users.push({
+                    ...e.sender,
+                    display_name: e.sender.email,
+                    blocked_by_me: false,
+                    blocked_me: false,
+                });
+            }
+
             // Deduplicate if message was already added
             if (this.messages.some(m => m.id === e.id)) {
                 return;
@@ -506,11 +694,11 @@ new #[Title('Chat')] class extends Component {
                     return;
                 }
 
-                let text = '[Encrypted Message]';
+                let text = '[Message unavailable on this browser]';
                 if (window.E2EE) {
                     try {
-                        text = await window.E2EE.decryptMessage(this.sharedKey, e.encrypted_payload, e
-                            .iv);
+                        const messageKey = await this.sharedKeyForMessage(e);
+                        if (messageKey) text = await window.E2EE.decryptMessage(messageKey, e.encrypted_payload, e.iv);
                     } catch (err) {
                         console.error('Failed to decrypt incoming message:', err);
                     }

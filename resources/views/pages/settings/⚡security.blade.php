@@ -3,6 +3,7 @@
 use App\Concerns\PasswordValidationRules;
 use Flux\Flux;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Actions\DisableTwoFactorAuthentication;
 use Laravel\Fortify\Features;
@@ -30,7 +31,7 @@ new #[Title('Security settings')] class extends Component {
     /**
      * Update the password for the currently authenticated user.
      */
-    public function updatePassword(): void
+    public function updatePassword(?array $passwordKeyBackup = null): void
     {
         try {
             $validated = $this->validate([
@@ -43,9 +44,32 @@ new #[Title('Security settings')] class extends Component {
             throw $e;
         }
 
-        Auth::user()->update([
-            'password' => $validated['password'],
-        ]);
+        $user = Auth::user();
+
+        if ($user->password_key_backup !== null) {
+            if ($passwordKeyBackup === null) {
+                throw ValidationException::withMessages([
+                    'password' => 'Rewrapping the encrypted chat key backup is required.',
+                ]);
+            }
+
+            $passwordKeyBackup = Validator::make(
+                ['password_key_backup' => $passwordKeyBackup],
+                [
+                    'password_key_backup' => ['required', 'array'],
+                    'password_key_backup.salt' => ['required', 'string'],
+                    'password_key_backup.iv' => ['required', 'string'],
+                    'password_key_backup.ciphertext' => ['required', 'string'],
+                ],
+            )->validate()['password_key_backup'];
+
+            $user->forceFill([
+                'password' => $validated['password'],
+                'password_key_backup' => json_encode($passwordKeyBackup, JSON_THROW_ON_ERROR),
+            ])->save();
+        } else {
+            $user->update(['password' => $validated['password']]);
+        }
 
         $this->reset('current_password', 'password', 'password_confirmation');
 
@@ -61,7 +85,7 @@ new #[Title('Security settings')] class extends Component {
     <flux:heading level="2" class="sr-only">{{ __('Security settings') }}</flux:heading>
 
     <x-pages::settings.layout :heading="__('Update password')" :subheading="__('Ensure your account is using a long, random password to stay secure')">
-        <form method="POST" wire:submit="updatePassword" class="mt-6 space-y-6">
+        <form method="POST" x-on:submit.prevent="window.updatePasswordBackup($wire, $el)" class="mt-6 space-y-6">
             <flux:input
                 wire:model="current_password"
                 :label="__('Current password')"
@@ -89,6 +113,7 @@ new #[Title('Security settings')] class extends Component {
                 viewable
             />
 
+            <p data-password-backup-error role="alert" class="text-sm text-red-600"></p>
             <div class="flex items-center gap-4">
                 <flux:button variant="primary" type="submit" data-test="update-password-button">
                     {{ __('Save') }}

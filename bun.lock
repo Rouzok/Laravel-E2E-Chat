@@ -4,8 +4,10 @@
   "workspaces": {
     "": {
       "dependencies": {
+        "@scure/bip39": "^2.4.0",
         "@tailwindcss/vite": "^4.1.11",
         "concurrently": "^10.0.3",
+        "hash-wasm": "^4.12.0",
         "laravel-echo": "^2.5.0",
         "laravel-vite-plugin": "^3.1",
         "pusher-js": "^8.6.0",
@@ -43,6 +45,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@laravel/multiplex": ["@laravel/multiplex@0.4.4", "", { "dependencies": { "ansi-styles": "^7.0.0", "commander": "^15.0.0", "ink": "^7.1.0", "react": "^19.2.7", "string-width": "^8.2.2", "wrap-ansi": "^10.0.0" }, "os": [ "linux", "darwin", ], "bin": { "multiplex": "dist/cli.js" } }, "sha512-+pPLI4n3n75PPQLqjy4pBrKeugsBhHWtOfY4pDX2WXoAgPpgnxL+xiG9F9YUFjzuzlrzxDnEn4vOG5w1gRaGUg=="],
+
+    "@noble/hashes": ["@noble/hashes@2.4.0", "", {}, "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="],
 
     "@oxc-project/runtime": ["@oxc-project/runtime@0.146.0", "", {}, "sha512-lbXHIpZ1MmK6zuw5txlMdIZ2waLVUIU5Gnm3sEuwJOiqDfQfbtjeHscatmeBoxbv8+If9LFM6PGh/3DcDWYIYw=="],
 
@@ -173,6 +177,8 @@
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.1", "", {}, "sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw=="],
 
     "@rollup/rollup-linux-x64-gnu": ["@rollup/rollup-linux-x64-gnu@4.9.5", "", { "os": "linux", "cpu": "x64" }, "sha512-Dq1bqBdLaZ1Gb/l2e5/+o3B18+8TI9ANlA1SkejZqDgdU/jK/ThYaMPMJpVMMXy2uRHvGKbkz9vheVGdq3cJfA=="],
+
+    "@scure/bip39": ["@scure/bip39@2.4.0", "", { "dependencies": { "@noble/hashes": "2.4.0" } }, "sha512-82dxFbZUYboyOf0AXiydsQrFQ5Q4h9mX+O2UkE91ROYmsc0BKMGZLwDmy96Jpa2+vrtoxomjUhy1RPIgH/r2nA=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
@@ -367,6 +373,8 @@
     "get-east-asian-width": ["get-east-asian-width@1.7.0", "", {}, "sha512-XjH1AECxf0giL2V1aU8vKyRR2ppRUb5c0EvT7zuJTokQ74bNo52zOtghqdWIqrhUD79fo3x0WfKZdOqxF6LG1Q=="],
 
     "graceful-fs": ["graceful-fs@4.2.11", "", {}, "sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ=="],
+
+    "hash-wasm": ["hash-wasm@4.12.0", "", {}, "sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ=="],
 
     "indent-string": ["indent-string@5.0.0", "", {}, "sha512-m6FAo/spmsW2Ab2fU35JTYwtOKa2yAwXSwgjSv1TJzh4Mh7mC3lzAOVLBprb72XsTrgkEIsl7YrFNAiDiRhIGg=="],
 
