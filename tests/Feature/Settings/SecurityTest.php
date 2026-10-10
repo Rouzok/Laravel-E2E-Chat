@@ -81,4 +81,44 @@ class SecurityTest extends TestCase
 
         $response->assertHasErrors(['current_password']);
     }
+
+    public function test_password_change_rewraps_an_existing_chat_key_backup(): void
+    {
+        $user = User::factory()->create(['password' => Hash::make('password')]);
+        $user->forceFill([
+            'password_key_backup' => json_encode(['salt' => 'old-salt', 'iv' => 'old-iv', 'ciphertext' => 'old-ciphertext']),
+        ])->save();
+        $newBackup = ['salt' => 'new-salt', 'iv' => 'new-iv', 'ciphertext' => 'new-ciphertext'];
+
+        $this->actingAs($user);
+
+        Livewire::test('pages::settings.security')
+            ->set('current_password', 'password')
+            ->set('password', 'new-password')
+            ->set('password_confirmation', 'new-password')
+            ->call('updatePassword', $newBackup)
+            ->assertHasNoErrors();
+
+        $this->assertTrue(Hash::check('new-password', $user->refresh()->password));
+        expect($user->password_key_backup)->toBe(json_encode($newBackup));
+    }
+
+    public function test_password_change_requires_a_rewrapped_backup_when_one_exists(): void
+    {
+        $user = User::factory()->create(['password' => Hash::make('password')]);
+        $oldBackup = json_encode(['salt' => 'old-salt', 'iv' => 'old-iv', 'ciphertext' => 'old-ciphertext']);
+        $user->forceFill(['password_key_backup' => $oldBackup])->save();
+
+        $this->actingAs($user);
+
+        Livewire::test('pages::settings.security')
+            ->set('current_password', 'password')
+            ->set('password', 'new-password')
+            ->set('password_confirmation', 'new-password')
+            ->call('updatePassword')
+            ->assertHasErrors(['password']);
+
+        expect($user->fresh()->password_key_backup)->toBe($oldBackup);
+        $this->assertTrue(Hash::check('password', $user->fresh()->password));
+    }
 }

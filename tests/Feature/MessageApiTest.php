@@ -152,3 +152,52 @@ test('authenticated regular user can visit chat page', function () {
         ->assertOk()
         ->assertSee($contact->email);
 });
+
+test('stored messages include the key versions used for encryption', function () {
+    Event::fake([MessageSent::class]);
+
+    $sender = User::factory()->create();
+    $receiver = User::factory()->create();
+    $sender->forceFill(['public_key_version' => 2])->save();
+    $receiver->forceFill(['public_key_version' => 4])->save();
+    $sender->publicKeys()->create(['version' => 1, 'public_key' => 'sender-old']);
+    $sender->publicKeys()->create(['version' => 2, 'public_key' => 'sender-current']);
+    $receiver->publicKeys()->create(['version' => 4, 'public_key' => 'receiver-current']);
+
+    $response = $this->actingAs($sender)->postJson(route('messages.store'), [
+        'receiver_id' => $receiver->id,
+        'sender_key_version' => 1,
+        'receiver_key_version' => 4,
+        'encrypted_payload' => 'versioned-ciphertext',
+        'iv' => 'versioned-iv',
+    ])->assertCreated();
+
+    $response->assertJsonPath('sender_key_version', 1)
+        ->assertJsonPath('receiver_key_version', 4);
+    $this->assertDatabaseHas('messages', [
+        'id' => $response->json('id'),
+        'sender_key_version' => 1,
+        'receiver_key_version' => 4,
+    ]);
+    Event::assertDispatched(MessageSent::class);
+});
+
+test('rejects a message version that does not belong to the sender', function () {
+    $sender = User::factory()->create();
+    $receiver = User::factory()->create();
+    $otherUser = User::factory()->create();
+    $otherUser->publicKeys()->create(['version' => 1, 'public_key' => 'other-user-key']);
+
+    $this->actingAs($sender)->postJson(route('messages.store'), [
+        'receiver_id' => $receiver->id,
+        'sender_key_version' => 1,
+        'encrypted_payload' => 'ciphertext',
+        'iv' => 'iv',
+    ])->assertUnprocessable();
+
+    $this->assertDatabaseMissing('messages', [
+        'sender_id' => $sender->id,
+        'receiver_id' => $receiver->id,
+        'encrypted_payload' => 'ciphertext',
+    ]);
+});

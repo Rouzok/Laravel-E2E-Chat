@@ -20,6 +20,10 @@ use Illuminate\Support\Str;
  * @property string $email
  * @property UserRole $role
  * @property string|null $public_key
+ * @property int $public_key_version
+ * @property string|null $password_key_backup
+ * @property string|null $recovery_key_backup
+ * @property string|null $recovery_key_verifier
  * @property Carbon|null $email_verified_at
  * @property string $password
  * @property string|null $two_factor_secret
@@ -30,15 +34,13 @@ use Illuminate\Support\Str;
  * @property Carbon|null $updated_at
  */
 #[Fillable(['name', 'email', 'password', 'role', 'public_key'])]
-#[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
+#[Hidden(['password', 'password_key_backup', 'recovery_key_backup', 'recovery_key_verifier', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
     /**
-     * Get the attributes that should be cast.
-     *
      * @return array<string, string>
      */
     protected function casts(): array
@@ -47,28 +49,20 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'public_key_version' => 'integer',
         ];
     }
 
-    /**
-     * Check if the user is an admin.
-     */
     public function isAdmin(): bool
     {
         return $this->role === UserRole::Admin;
     }
 
-    /**
-     * Check if the user is a standard user.
-     */
     public function isUser(): bool
     {
         return $this->role === UserRole::User;
     }
 
-    /**
-     * Check if the user has a specific role.
-     */
     public function hasRole(UserRole|string $role): bool
     {
         if (is_string($role)) {
@@ -78,40 +72,46 @@ class User extends Authenticatable
         return $this->role === $role;
     }
 
-    /**
-     * Get the messages sent by the user.
-     *
-     * @return HasMany<Message, $this>
-     */
+    /** @return HasMany<Message, $this> */
     public function sentMessages(): HasMany
     {
         return $this->hasMany(Message::class, 'sender_id');
     }
 
-    /**
-     * Get the messages received by the user.
-     *
-     * @return HasMany<Message, $this>
-     */
+    /** @return HasMany<Message, $this> */
     public function receivedMessages(): HasMany
     {
         return $this->hasMany(Message::class, 'receiver_id');
     }
 
-    /**
-     * Get the users in this user's contact list.
-     *
-     * @return BelongsToMany<User, $this>
-     */
+    /** @return HasMany<UserPublicKey, $this> */
+    public function publicKeys(): HasMany
+    {
+        return $this->hasMany(UserPublicKey::class);
+    }
+
+    /** @return BelongsToMany<User, $this> */
     public function contacts(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'contacts', 'user_id', 'contact_id')
+            ->withPivot('custom_name')
             ->withTimestamps();
     }
 
-    /**
-     * Get the user's initials
-     */
+    /** @return BelongsToMany<User, $this> */
+    public function blockedUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_blocks', 'blocker_id', 'blocked_id')
+            ->withTimestamps();
+    }
+
+    /** @return BelongsToMany<User, $this> */
+    public function blockedByUsers(): BelongsToMany
+    {
+        return $this->belongsToMany(User::class, 'user_blocks', 'blocked_id', 'blocker_id')
+            ->withTimestamps();
+    }
+
     public function initials(): string
     {
         $initials = Str::initials($this->name, true);

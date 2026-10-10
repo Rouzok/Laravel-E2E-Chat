@@ -11,19 +11,22 @@ new class extends Component {
     #[Validate('required|email|max:255')]
     public string $email = '';
 
+    #[Validate('nullable|string|max:80')]
+    public ?string $customName = null;
+
     public ?string $successMessage = null;
 
     public function openModal(): void
     {
         $this->isOpen = true;
-        $this->reset('email', 'successMessage');
+        $this->reset('email', 'customName', 'successMessage');
         $this->resetValidation();
     }
 
     public function closeModal(): void
     {
         $this->isOpen = false;
-        $this->reset('email', 'successMessage');
+        $this->reset('email', 'customName', 'successMessage');
         $this->resetValidation();
     }
 
@@ -55,18 +58,31 @@ new class extends Component {
             return;
         }
 
-        $authUser->contacts()->attach($contact->id);
+        $customName = trim((string) $this->customName);
 
-        $this->successMessage = __(':name has been added to your contacts.', ['name' => $contact->name]);
+        $authUser->contacts()->attach($contact->id, [
+            'custom_name' => $customName === '' ? null : $customName,
+        ]);
+
+        $this->successMessage = __(':name has been added to your contacts.', ['name' => $customName ?: $contact->email]);
 
         $this->dispatch('contact-added');
         $this->dispatch('contacts-updated', users: $authUser->contacts()
             ->where('role', 'user')
             ->select(['users.id', 'users.name', 'users.email', 'users.public_key'])
-            ->get(), addedContactId: $contact->id);
+            ->get()
+            ->map(fn (User $user): array => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'public_key' => $user->public_key,
+                'display_name' => $user->pivot->custom_name ?: $user->email,
+                'blocked_by_me' => Auth::user()->blockedUsers()->whereKey($user->id)->exists(),
+                'blocked_me' => $user->blockedUsers()->whereKey(Auth::id())->exists(),
+            ]), addedContactId: $contact->id);
         $this->isOpen = false;
 
-        $this->reset('email');
+        $this->reset('email', 'customName');
     }
 }; ?>
 
@@ -132,6 +148,24 @@ new class extends Component {
                             autocomplete="off"
                         />
                         @error('email')
+                            <p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
+                        @enderror
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="contact-custom-name" class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1.5">
+                            {{ __('Custom name') }} <span class="font-normal text-neutral-500">({{ __('optional') }})</span>
+                        </label>
+                        <input
+                            id="contact-custom-name"
+                            type="text"
+                            wire:model="customName"
+                            maxlength="80"
+                            placeholder="{{ __('Leave blank to use their email') }}"
+                            class="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-zinc-700 px-4 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400"
+                            autocomplete="off"
+                        />
+                        @error('customName')
                             <p class="mt-1.5 text-xs text-red-600 dark:text-red-400">{{ $message }}</p>
                         @enderror
                     </div>
